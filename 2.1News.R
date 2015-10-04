@@ -19,7 +19,7 @@ handle <- getCurlHandle(cookiejar
                         verbose
                         = TRUE,
                         httpheader = list( from
-                                           = "sw4512@ic.ac.uk",
+                                           = "your.email@address.com",
                                            'user-agent' = str_c(R.version$version.string, ", ", R.version$platform)
                   ))
 
