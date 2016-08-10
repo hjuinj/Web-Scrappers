@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-"""
 """
     #TODOs:
-        - R mongodb
+        - R mongodb Done
         - small letter captial letters considerations
+"c:\Program Files\MongoDB\Server\3.0\bin\mongod.exe" --dbpath e:mongodb\data\
 """
 import requests
 from bs4 import BeautifulSoup
@@ -63,7 +64,8 @@ def getPapers(page):
     return papers
 
 # map key value pair of a paper given the div object
-def registerPaper(paper):
+# fromWho shows which author's page the paper is from
+def registerPaper(paper, fromWho):
     string = paper.p.get_text()
 
     # remove spaces and split the long stirng into different fields (e.g. author, year, title etc)
@@ -73,8 +75,10 @@ def registerPaper(paper):
         year_index = [i for i, item in enumerate(fields) if re.search('^[1|2][0-9]{3}$', item)][0]
     except IndexError:
         paperObj = {
+            'from' : fromWho,
             'author(s)' : [author.upper() for author in fields[ : -1]],
             'title' : fields[-1],
+            'publication-type' : paper.find('span', attrs = {'class' : 'publication-type'}).get_text(),
         }
         return paperObj
 
@@ -88,6 +92,7 @@ def registerPaper(paper):
         num_citations = 0
 
     paperObj = {
+            'from' : fromWho,
         'author(s)' : [author.upper() for author in fields[ : year_index]],
         'year' : fields[year_index], # using it as category so doesn't need to be type integer
         'title' : fields[year_index + 1],
@@ -106,6 +111,7 @@ def main():
     # Database prep
     client = MongoClient()
     db = client.ICchem
+    db.literatures.drop()
     lit = db.literatures
 
     # Get all staffs that has their own page
@@ -114,7 +120,6 @@ def main():
     html = getHTML(staffPage)
     soup = BeautifulSoup(html,'html.parser')
     staffList = getStaffs(soup)
-    #TODO storage of above table
 
     # Obtain papers for each staff
     for staff in staffList:
@@ -130,7 +135,7 @@ def main():
             for i in getPapers(soup):
                 #print registerPaper(i)['author(s)']
                 #TODO Storage
-                lit.insert_one(registerPaper(i))
+                lit.insert_one(registerPaper(i, staff['name']))
 
             url = nextPage(soup)
             if not url : break

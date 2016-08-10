@@ -1,0 +1,50 @@
+---
+title: "Summary of IC Chemistry Publications"
+author: "hjuinj"
+date: "2016-08-11"
+output: html_document
+---
+
+Load packages and establish connection to Mongodb.
+```{r warning = FALSE}
+library(rmongodb)
+library(stringr)
+library(ggplot2)
+
+mongo <- mongo.create()
+if(mongo.is.connected(mongo) == TRUE) {
+    db <- mongo.get.databases(mongo)
+    coll <- mongo.get.database.collections(mongo, db)
+}
+```
+
+The records are obtained from `r length(mongo.distinct(mongo, coll, "from"))` staffs. We can look at the relative proportion of Doctors and Proffesors in the department.
+
+```{r }
+df <- data.frame(names = mongo.distinct(mongo, coll, 'from'))
+df$isProf <- str_detect(toupper(df$names), "PROFESSOR")
+ggplot(df, aes(x = factor(1), fill = isProf) ) + geom_bar()  + coord_polar(theta = "y")+ theme(axis.title.x=element_blank(),        
+        axis.text.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank())
+
+```
+
+---
+
+There are in total `r mongo.count(mongo, coll)` entries. The entries are of the following types:
+```{r echo = FALSE}
+mongo.distinct(mongo, coll, 'publication-type')
+```
+
+We can take a look at how many entries of each publication type are there, note the y-axis is on a log scale:
+```{r }
+df <- mongo.find.all(mongo, coll, fields = list('publication-type' = 1, '_id' = 0), data.frame = T)
+ggplot(df, aes(x = publication.type) ) + geom_bar() + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_y_log10(breaks = c(1,10,100,1000,10000)) 
+```
+
+It is most interesting to look at only journal & conference publications, which are the vast majority of entries anyways. There are `r mongo.count(mongo, coll, query=list("$or" = list(list("publication-type" = "JOURNAL ARTICLE"), list("publication-type" = "CONFERENCE PAPER"))))` such entries. 
+
+staffs proffessor or doctor
+
