@@ -4,12 +4,17 @@ author: "hjuinj"
 date: "2016-08-11"
 output: html_document
 ---
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      warning=FALSE, message=FALSE)
+```
 
 Load packages and establish connection to Mongodb.
-```{r warning = FALSE}
+```{r }
 library(rmongodb)
 library(stringr)
 library(ggplot2)
+library(knitr)
 
 mongo <- mongo.create()
 if(mongo.is.connected(mongo) == TRUE) {
@@ -18,7 +23,8 @@ if(mongo.is.connected(mongo) == TRUE) {
 }
 ```
 
-The records are obtained from `r length(mongo.distinct(mongo, coll, "from"))` staffs. We can look at the relative proportion of Doctors and Proffesors in the department.
+#Staffs
+The records are obtained from `r length(mongo.distinct(mongo, coll, "from"))` staffs. We can look at the relative proportion of Doctors and Professors in the department.
 
 ```{r }
 df <- data.frame(names = mongo.distinct(mongo, coll, 'from'))
@@ -30,8 +36,7 @@ ggplot(df, aes(x = factor(1), fill = isProf) ) + geom_bar()  + coord_polar(theta
 
 ```
 
----
-
+#Publication
 There are in total `r mongo.count(mongo, coll)` entries. The entries are of the following types:
 ```{r echo = FALSE}
 mongo.distinct(mongo, coll, 'publication-type')
@@ -46,5 +51,65 @@ ggplot(df, aes(x = publication.type) ) + geom_bar() +
 
 It is most interesting to look at only journal & conference publications, which are the vast majority of entries anyways. There are `r mongo.count(mongo, coll, query=list("$or" = list(list("publication-type" = "JOURNAL ARTICLE"), list("publication-type" = "CONFERENCE PAPER"))))` such entries. 
 
-staffs proffessor or doctor
 
+```{r}
+main <- mongo.find.all(mongo, coll, query=list("$or" = list(list("publication-type" = "JOURNAL ARTICLE"), list("publication-type" = "CONFERENCE PAPER"))), fields = list('publication-type' = 1, 'title' = 1, 'num_citations' = 1, 'journal' = 1, 'year' = 1, 'from' = 1, '_id' = 0))
+
+
+# Only keeps data entries that have all the header fields defined. 
+list2df <- function(list, headers){
+    output = list()
+    for(i in 1:length(list)){
+        record = T
+        for(j in headers){
+            if(is.null(list[[i]][[j]])){
+                record = F
+                break
+            }
+        }
+        if(record == T){
+            for(j in headers)
+                output[[j]] <-  c(output[[j]], list[[i]][[j]])
+        }
+    }
+    return(as.data.frame(output))
+}
+```
+
+
+
+```{r}
+# df <- data.frame(journals = unlist(lapply(main, function(i) i$journal)), stringsAsFactors = F)
+df <- list2df(main, c('journal', 'title'))
+```
+The `r length(df$journal)` journal submissions are delivered to  `r length(unique(df$journal))` different journals. A coarse look at the number of submissions to each of the journals. Have a guess what is the most popular journal(the tallest bar). Bear in mind multiple academics could be have drafted the same paper, this needs to be accounted for.
+```{r}
+df <- df[!duplicated(df$title), ]
+ggplot(df, aes(x = journal) ) + geom_bar() + theme(axis.text.x=element_blank(),axis.ticks=element_blank())
+q <- aggregate(df$journal, by=list(df$journal), length)
+colnames(q) <- c("Journal.Names", "Submission")
+q <- q[order(q$Submission, decreasing = T),]
+kable(tail(q, 10), row.names = F)
+kable(head(q, 10), row.names = F)
+```
+
+Let's look at the top 20 most popular journals:
+```{r}
+q$Journal.Names <- factor(q$Journal.Names, levels = q$Journal.Names)
+ggplot(q[1:20, ], aes(x = Journal.Names, y = Submission)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+There does not seem to be a significant bias towards any of the three areas of chemistry. 
+
+#Citations
+```{r}
+df <- list2df(main, c('title', 'num_citations'))
+df$title <- str_trim(df$title)
+df <- df[!duplicated(df$title), ]
+df <- df[order(df$num_citations, decreasing = T), ]
+ggplot(df, aes(x = num_citations)) + geom_bar() + xlim(0, 250) + ylim(0,300)
+```
+There are some 'citation beasts' - outliers not included in the above bar chart:
+````{r echo = F}
+kable(head(df, 20), row.names = F)
+````

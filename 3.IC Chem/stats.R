@@ -9,11 +9,13 @@ if(mongo.is.connected(mongo) == TRUE) {
 }
 
 
+#total entries
 mongo.count(mongo, coll)
 
 type <- mongo.distinct(mongo, coll, 'publication-type')
 person <- mongo.distinct(mongo, coll, "from")
 mongo.distinct(mongo, coll, "title")
+journals <- mongo.distinct(mongo, coll, "journal")
 
 mongo.distinct(mongo, coll, "journal", fields = list('publication-type' = 1))
 
@@ -23,3 +25,5 @@ df <- mongo.find.all(mongo, coll, fields = list(from = 1, title = 1, 'publicatio
 ggplot(df, aes(x = df$)) + geom_bar()
 
 
+
+# citations

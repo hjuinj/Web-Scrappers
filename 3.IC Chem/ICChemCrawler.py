@@ -67,10 +67,12 @@ def getPapers(page):
 # fromWho shows which author's page the paper is from
 def registerPaper(paper, fromWho):
     string = paper.p.get_text()
-
+    
+    
     # remove spaces and split the long stirng into different fields (e.g. author, year, title etc)
     strings = string.strip().split(',')
     fields = [s.strip() for s in strings]
+
     try:
         year_index = [i for i, item in enumerate(fields) if re.search('^[1|2][0-9]{3}$', item)][0]
     except IndexError:
@@ -81,7 +83,8 @@ def registerPaper(paper, fromWho):
             'publication-type' : paper.find('span', attrs = {'class' : 'publication-type'}).get_text(),
         }
         return paperObj
-
+    
+    
     # remove potential et al. suffix after the last author
     fields[year_index - 1] = fields[year_index - 1].replace('et al.', '' )
 
@@ -92,18 +95,22 @@ def registerPaper(paper, fromWho):
         num_citations = 0
 
     paperObj = {
-            'from' : fromWho,
+        'from' : fromWho,
         'author(s)' : [author.upper() for author in fields[ : year_index]],
         'year' : fields[year_index], # using it as category so doesn't need to be type integer
-        'title' : fields[year_index + 1],
+
         'publication-type' : paper.find('span', attrs = {'class' : 'publication-type'}).get_text(),
         'num_citations' : num_citations,
     }
     try:
-        paperObj['journal'] = fields[year_index + 2].upper()
+        journal = paper.em.get_text().split(',')[0]
+        journal_index = fields.index(journal)        
+        #paperObj['journal'] = fields[year_index + 2].upper()
+        paperObj['title'] = ','.join(fields[year_index + 1 : journal_index])
+        paperObj['journal'] = journal
         paperObj['others'] = fields[year_index + 3 : ]
-    except IndexError:
-        pass
+    except (IndexError, AttributeError) as err:
+        paperObj['title'] = fields[year_index + 1 ]
 
     return paperObj
 
