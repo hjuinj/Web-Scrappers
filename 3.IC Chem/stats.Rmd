@@ -9,12 +9,14 @@ knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
                       warning=FALSE, message=FALSE)
 ```
 
-Load packages and establish connection to Mongodb.
+Load packages and establish connection to Mongodb (here my db is located on the default port on my localhost).
 ```{r }
 library(rmongodb)
 library(stringr)
 library(ggplot2)
 library(knitr)
+library(gridExtra)
+library(reshape)
 
 mongo <- mongo.create()
 if(mongo.is.connected(mongo) == TRUE) {
@@ -42,14 +44,13 @@ There are in total `r mongo.count(mongo, coll)` entries. The entries are of the 
 mongo.distinct(mongo, coll, 'publication-type')
 ```
 
-We can take a look at how many entries of each publication type are there, note the y-axis is on a log scale:
+We can take a look at how many entries of each publication type are there, note the y-axis is on a **log** scale:
 ```{r }
 df <- mongo.find.all(mongo, coll, fields = list('publication-type' = 1, '_id' = 0), data.frame = T)
-ggplot(df, aes(x = publication.type) ) + geom_bar() + 
-    theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_y_log10(breaks = c(1,10,100,1000,10000)) 
+ggplot(df, aes(x = publication.type) ) + geom_bar() +  geom_text(aes(label = ..count..), stat = "count", vjust = -1)+ theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_y_log10(breaks = c(1,10,100,1000,10000)) 
 ```
 
-It is most interesting to look at only journal & conference publications, which are the vast majority of entries anyways. There are `r mongo.count(mongo, coll, query=list("$or" = list(list("publication-type" = "JOURNAL ARTICLE"), list("publication-type" = "CONFERENCE PAPER"))))` such entries. 
+It is most interesting to look at only journal & conference publications, which are the vast majority of entries anyways. There are `r mongo.count(mongo, coll, query=list("$or" = list(list("publication-type" = "JOURNAL ARTICLE"), list("publication-type" = "CONFERENCE PAPER"))))` such entries. Bear in mind there are duplicate entries, where IC chemistry staffs collaborated to produce a piece of work.
 
 
 ```{r}
@@ -113,3 +114,95 @@ There are some 'citation beasts' - outliers not included in the above bar chart:
 ````{r echo = F}
 kable(head(df, 20), row.names = F)
 ````
+
+#Prof vs Doc
+I would expect there is some correlation between the year of publication and the number of citations (the highest cited force-field paper removed):
+```{r}
+df <- list2df(main, c('title', 'year', 'num_citations', 'from'))
+# df$title <- str_trim(df$title)
+# df <- df[!duplicated(df$title), ]
+ggplot(df, aes(year, num_citations)) + geom_point() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + ylim(0, 2500)
+```
+Nope, doesn't seem like it. But maybe professors have in a general a higher citation rate than docs?
+```{r}
+df$isProf <- str_detect(toupper(df$from), "PROFESSOR")
+# ggplot(df, aes(year, num_citations)) + geom_point(aes(color = isProf)) + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + ylim(0, 2500)
+ggplot(data = df, mapping = aes(x = num_citations)) + facet_grid(isProf~., scale = 'free') + geom_histogram(data = subset(df, isProf == F), binwidth = 1, fill = "red", alpha = 0.5) + geom_histogram(data = subset(df, isProf == T), binwidth = 1 , fill = "blue", alpha = 0.5) + xlim(0, 250) + ylim(0, 300) 
+```
+A clear indication of difference would be a shift of the bottom (professor num_citations) distribution to the right w.r.t the top distribution, which is not seen. However, there is a more visible tail for the bottom distribution than the top. This indicates professors tend to have more higher cited papers.
+In addition, the bottom distribution is taller than the top one, mind you this is despite the fact that only about one third of the department are professors. This means an indicator of professors is that they tend to have published more than doctors. A clearer way to demonstrate this is to compare the disbutions of the number of publications for professors and doctors. 
+
+```{r}
+q <- aggregate(df$from, by = list(df$from), length)
+colnames(q) <- c('name', 'num_publications')
+q$isProf <- str_detect(toupper(q$name), "PROFESSOR")
+ggplot(data = q, mapping = aes(x = num_publications)) + facet_grid(isProf~., scale = 'free') + geom_histogram(data = subset(q, isProf == F), fill = "red", alpha = 0.5) + geom_histogram(data = subset(q, isProf == T), fill = "blue", alpha = 0.5) + ylab("Number of Profs / Docs")
+```
+
+#Internal Collaborations
+Is there a lot of internal collaborations between staffs? Who collaborates with whom within IC chem? One way to look at that is to tally which staffs have the same publications.
+```{r}
+df <- list2df(main, c('from', 'title'))
+df$title <- iconv(df$title,"WINDOWS-1252","UTF-8")
+df$title <- toupper(df$title)
+#df <- df[duplicated(df$title), ]
+#q <- aggregate(df$title, list(df$title), length)
+#q <- q$Group.1[q$x > 1]
+q <- unique(df$title)
+# avoid same title by the same author
+q <-sapply(q, function(i){
+    length(unique(df$from[df$title == i])) 
+})
+p <- names(q[q > 1])
+s <- unique(df$from[df$title %in% p])
+```
+Actually, `r length(p)` pieces of work were collarborative efforts. That is quite a large proportion. `r length(s)` staffs were involved in internal collaborations, almost the whole department.
+
+A heatmap can show which staffs work together. Each row and column with a index represents a staff, where the staffs are sorted alphabetically by name. The table below the heatmap shows the index and name mapping. In the heatmap, the lighter the colour, the more collaboration between a pair of staffs, also the higher the number in the cell.
+```{r, fig.width=15, fig.height=15}
+heatmap <- function(matrix, xlabel = NULL, ylabel = NULL, fill = NULL, color= NULL, text_size = 7){
+    matrix <- as.data.frame(matrix)
+    colors <- c("steelblue", "seagreen", "darkorchid", "maroon")
+    melt <- melt(matrix)
+    if(ncol(melt) == 2){
+        melt$variable1 <- melt$variable
+        melt$variable2 <- rep(rownames(matrix), nrow(matrix))
+        melt$variable1 <- factor(melt$variable1, levels = (unique(as.character(rownames(matrix)))))
+        melt$variable2 <- factor(melt$variable2, levels = rev(unique(as.character(rownames(matrix)))))
+    }
+    p <- ggplot(melt,aes(x = variable1, y = variable2)) + geom_tile(aes(fill = value), colour = "white") + scale_fill_gradient(high = "white", low = "black")
+    p <- p + geom_text(aes(fill = value, label = round(value,2)), size = text_size) + labs(x = xlabel, y = ylabel, fill = fill) + theme(axis.text.x = element_text(angle = 90)) + theme(legend.position = "none")
+}
+
+staffs <- as.character(sort(s))
+matrix <- matrix(0, nrow = length(staffs), ncol = length(staffs))
+colnames(matrix) <- rownames(matrix) <- staffs
+collaborations <- lapply(p,function(i) df$from[(df$title == i)] )
+for(i in collaborations){
+    for(j in 1:(length(i) - 1)){
+        for(k in (j + 1):length(i)){
+#             print(str_c(i[k],i[j]))
+#             print(i[k] %in% colnames(matrix))
+#             print(i[k] %in% rownames(matrix))
+#             print(i[j] %in% rownames(matrix))
+#             print(i[j] %in% colnames(matrix))
+            r <- which(i[j] == staffs)
+            c <- which(i[k] == staffs)
+            matrix[r, c] <- matrix[c, r] <- 1 + matrix[r, c]
+        }
+    }
+}    
+colnames(matrix) <- rownames(matrix) <- 1:length(staffs)
+p <- heatmap(matrix, text_size = 3)
+p
+kable(data.frame(Index = (1:length(staffs)), Name = staffs), row.names = F)
+```
+
+One can see Prof Heaney and Prof McCulloch has collaborated the most. Most of the collaborations were duos. In the most extreme case, 6 staffs collaborated on 5 different piece of work:
+```{r}
+ggplot(data.frame(x = sapply(collaborations, function(i) length(i))), aes(x) ) + geom_bar() +  geom_text(aes(y = ..count.. , label = ..count..), stat = "count", vjust = -1) + scale_y_log10() + scale_x_discrete() + xlab("Number of staffs contributed to the paper")
+```
+
+
+There is a lot a lot a lot more that can be done with the data, employing more sophisticated analysis, which I might venture into if one day I feel like it. 
+The natural language processing done here is very crude and hence the numbers here are by no means absoluatly accurate. But I believe the general inferences are sound.
